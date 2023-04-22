@@ -13,6 +13,9 @@
   (falseE)
   (argE)
   (thisE)
+  (lamE [n : Symbol]
+        [arg-type : Type]
+        [body : Exp])
   (equalsE [fst : Exp]
            [snd : Exp])
   (newE [class-name : Symbol]
@@ -30,6 +33,8 @@
            [object : Exp])
   (instanceE [object : Exp]
              [comp : Symbol])
+    (appE [fun : Exp]
+        [arg : Exp])
   )
 
 (define-type Class
@@ -41,7 +46,33 @@
   (boolV [b : Boolean])
   (numV [n : Number])
   (objV [class-name : Symbol]
-        [field-values : (Listof Value)]))
+        [field-values : (Listof Value)])
+  (closV [arg : Symbol]
+         [body : Exp]
+         [env : Env]))
+
+(define-type Binding
+  (bind [name : Symbol]
+        [val : Value]))
+
+(define-type-alias Env (Listof Binding))
+
+(define-type Type
+  (numT)
+  (boolT)
+  (objT)
+  (arrowT [arg : Type]
+          [result : Type])
+  (varT [is : (Boxof (Optionof Type))]))
+
+(define-type Type-Binding
+  (tbind [name : Symbol]
+         [type : Type]))
+
+(define-type-alias Type-Env (Listof Type-Binding))
+
+(define mt-env empty)
+(define extend-env cons)
 
 (module+ test
   (print-only-errors #t))
@@ -79,10 +110,10 @@
                                                           (recinst classes (find classes csuper-name) test)))])
     ))
 
-(define interp : (Exp (Listof (Symbol * Class)) Value Value -> Value)
-  (lambda (a classes this-val arg-val)
+(define interp : (Exp (Listof (Symbol * Class)) Value Value Env -> Value)
+  (lambda (a classes this-val arg-val env)
     (local [(define (recur expr)
-              (interp expr classes this-val arg-val))]
+              (interp expr classes this-val arg-val env))]
       (type-case Exp a
         [(numE n) (numV n)]
         [(trueE) (boolV #t)]
@@ -91,6 +122,16 @@
         [(multE l r) (num* (recur l) (recur r))]
         [(thisE) this-val]
         [(argE) arg-val]
+        [(lamE n t body)
+         (closV n body env)]
+        [(appE fun arg) (type-case Value (interp fun classes this-val arg-val env)
+                      [(closV n body c-env)
+                       (interp body classes this-val arg-val
+                               (extend-env
+                                (bind n
+                                      (interp arg classes this-val arg-val env))
+                                c-env))]
+                          [else (error 'interp "not a function")])]
         [(equalsE fst snd) (local [(define f (recur fst))]
                              (local [(define s (recur snd))]
                                (type-case Value f
@@ -160,7 +201,7 @@
        (interp body-expr
                classes
                obj
-               arg-val))]))
+               arg-val mt-env))]))
 
 (define (num-op [op : (Number Number -> Number)]
                 [op-name : Symbol] 
@@ -204,19 +245,19 @@
   (define new-posn531 (newE 'Posn3D (list (numE 5) (numE 3) (numE 1))))
 
   (define (interp-posn a)
-    (interp a (list posn-class posn3D-class) (numV -1) (numV -1))))
+    (interp a (list posn-class posn3D-class) (numV -1) (numV -1) mt-env)))
 
 ;; ----------------------------------------
 
 (module+ test
   (test (interp (numE 10) 
-                empty (objV 'Object empty) (numV 0))
+                empty (objV 'Object empty) (numV 0) mt-env)
         (numV 10))
   (test (interp (plusE (numE 10) (numE 17))
-                empty (objV 'Object empty) (numV 0))
+                empty (objV 'Object empty) (numV 0)  mt-env)
         (numV 27))
   (test (interp (multE (numE 10) (numE 7))
-                empty (objV 'Object empty) (numV 0))
+                empty (objV 'Object empty) (numV 0)  mt-env)
         (numV 70))
 
   (test (interp-posn (newE 'Posn (list (numE 2) (numE 7))))
@@ -260,6 +301,9 @@
   (falseI)
   (argI)
   (thisI)
+  (lamI [n : Symbol]
+        [arg-type : Type]
+        [body : ExpI])
   (equalsI [fst : ExpI]
            [snd : ExpI])
   (newI [class-name : Symbol]
@@ -274,7 +318,9 @@
   (selectI [test : ExpI]
            [object : ExpI])
   (instanceI [object : ExpI]
-             [comp : Symbol]))
+             [comp : Symbol])
+  (appI [fun : ExpI]
+        [arg : ExpI]))
 
 (define-type ClassI
   (classI [super-name : Symbol]
@@ -298,6 +344,7 @@
       [(argI) (argE)]
       [(thisI) (thisE)]
       [(equalsI fst snd) (equalsE (recur fst) (recur snd))]
+      [(lamI n arg-type body) (lamE n arg-type (recur body))]
       [(newI class-name field-exprs)
        (newE class-name (map recur field-exprs))]
       [(getI expr field-name)
@@ -312,7 +359,8 @@
                method-name
                (recur arg-expr))]
       [(selectI test object) (selectE (recur test) (recur object))]
-      [(instanceI object comp) (instanceE (recur object) comp)])))
+      [(instanceI object comp) (instanceE (recur object) comp)]
+      [(appI fun arg) (appE (recur fun) (recur arg))])))
 
 (module+ test
   (test (exp-i->c (numI 10) 'Object)
@@ -508,7 +556,7 @@
                      (values name
                              (flatten-class name classes-not-flat i-classes))))
                  classes-not-flat))]
-    (interp a classes (objV 'Object empty) (numV 0))))
+    (interp a classes (objV 'Object empty) (numV 0) mt-env)))
 
 (module+ test
   (test (interp-i (numI 0) empty)
@@ -589,7 +637,115 @@
    [(s-exp-match? `{instanceof ANY SYMBOL} s)
     (instanceI (parse (second (s-exp->list s)))
             (s-exp->symbol (third (s-exp->list s))))]
+   [(s-exp-match? `{let {[SYMBOL : ANY ANY]} ANY} s)
+     (let ([bs (s-exp->list (first
+                             (s-exp->list (second
+                                           (s-exp->list s)))))])
+       (appI (lamI (s-exp->symbol (first bs))
+                   (parse-type (third bs))
+                   (parse (third (s-exp->list s))))
+             (parse (fourth bs))))]
+    [(s-exp-match? `{lambda {[SYMBOL : ANY]} ANY} s)
+     (let ([arg (s-exp->list
+                 (first (s-exp->list 
+                         (second (s-exp->list s)))))])
+       (lamI (s-exp->symbol (first arg))
+             (parse-type (third arg))
+             (parse (third (s-exp->list s)))))]
+    [(s-exp-match? `{ANY ANY} s)
+     (appI (parse (first (s-exp->list s)))
+           (parse (second (s-exp->list s))))]
    [else (error 'parse "invalid input")]))
+
+(define (parse-type [s : S-Exp]) : Type
+  (cond
+    [(s-exp-match? `num s) 
+     (numT)]
+    [(s-exp-match? `bool s)
+     (boolT)]
+    [(s-exp-match? `(ANY -> ANY) s)
+     (arrowT (parse-type (first (s-exp->list s)))
+             (parse-type (third (s-exp->list s))))]
+    [(s-exp-match? `obj s)
+     (objT)]
+    [(s-exp-match? `? s) 
+     (varT (box (none)))]
+    [else (error 'parse-type "invalid input")]))
+
+
+
+
+;; unify! ----------------------------------------
+(define (unify! [t1 : Type] [t2 : Type] [expr : Exp])
+  (type-case Type t1
+    [(varT is1)
+     (type-case (Optionof Type) (unbox is1)
+       [(some t3) (unify! t3 t2 expr)]
+       [(none)
+        (local [(define t3 (resolve t2))]
+          (if (eq? t1 t3)
+              (values)
+              (if (occurs? t1 t3)
+                  (type-error expr t1 t3)
+                  (begin
+                    (set-box! is1 (some t3))
+                    (values)))))])]
+    [else
+     (type-case Type t2
+       [(varT is2) (unify! t2 t1 expr)]
+       [(numT) (type-case Type t1
+                 [(numT) (values)]
+                 [else (type-error expr t1 t2)])]
+       [(boolT) (type-case Type t1
+                  [(boolT) (values)]
+                  [else (type-error expr t1 t2)])]
+       [(arrowT a2 b2) (type-case Type t1
+                         [(arrowT a1 b1)
+                          (begin
+                            (unify! a1 a2 expr)
+                            (unify! b1 b2 expr))]
+                         [else (type-error expr t1 t2)])]
+       [(objT) (type-case Type t1
+                 [(objT) (values)]
+                 [else (type-error expr t1 t2)])])]))
+
+(define (resolve [t : Type]) : Type
+  (type-case Type t
+    [(varT is)
+     (type-case (Optionof Type) (unbox is)
+       [(none) t]
+       [(some t2) (resolve t2)])]
+    [else t]))
+
+(define (occurs? [r : Type] [t : Type]) : Boolean
+  (type-case Type t
+    [(numT) #f]
+    [(boolT) #f]
+    [(arrowT a b)
+     (or (occurs? r a)
+         (occurs? r b))]
+    [(varT is) (or (eq? r t) ; eq? checks for the same box
+                   (type-case (Optionof Type) (unbox is)
+                     [(none) #f]
+                     [(some t2) (occurs? r t2)]))]
+    [(objT) #f]))
+
+(define (type-error [a : Exp] [t1 : Type] [t2 : Type])
+  (error 'typecheck (string-append
+                     "no type: "
+                     (string-append
+                      (to-string a)
+                      (string-append
+                       " type "
+                       (string-append
+                        (to-string t1)
+                        (string-append
+                         " vs. "
+                         (to-string t2))))))))
+
+
+
+
 
 (module+ test
   (test (parse `0)
@@ -643,6 +799,7 @@
     (type-case Value v
       [(numV n) (number->s-exp n)]
       [(objV class-name field-vals) `object]
+      [(closV n b e) `function]
       [(boolV b) (boolean->s-exp b)])))
 
 (module+ test
