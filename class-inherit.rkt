@@ -142,7 +142,12 @@
                                                                            (local [(define sc (find classes name))]
                                                                              (type-case Class fc
                                                                                [(classC fsuper-name ffieldnames fmethodnames) (type-case Class sc
-                                                                               [(classC ssuper-name sfieldnames smethodnames) (if (equal? ffieldnames sfieldnames) (if (equal? values v) (boolV #t) (boolV #f)) (boolV #f))])])))]
+                                                                               [(classC ssuper-name sfieldnames smethodnames)
+                                                                                (if (equal? ffieldnames sfieldnames)
+                                                                                    (if (equal? values v)
+                                                                                        (boolV #t)
+                                                                                        (boolV #f))
+                                                                                    (boolV #f))])])))]
                                                           [else (boolV #f)])]
                                [else (boolV (equal? f s))])))]
         [(newE class-name field-exprs)
