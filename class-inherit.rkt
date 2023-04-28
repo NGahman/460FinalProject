@@ -15,6 +15,8 @@
   (thisE)
   (equalsE [fst : Exp]
            [snd : Exp])
+  (assignE [fst : Exp]
+        [snd : Exp])
   (newE [class-name : Symbol]
         [args : (Listof Exp)])
   (getE [obj-expr : Exp]
@@ -79,6 +81,34 @@
                                                           (recinst classes (find classes csuper-name) test)))])
     ))
 
+
+
+;;getvalues & getpositions ----------------------------------------
+(define (getindex [l : (Listof 'a)] [count : Number]) : Value
+  (if (equal? l empty)
+      (error 'getindex "index not in range")
+      (if (equal? count 0)
+          (first l)
+          (getindex (rest l) (- count 1)))))
+
+(define (getvalues [get : (Listof Number)] [list : (Listof Value)]) : (Listof Value)
+  (if (equal? get empty)
+       empty
+       (cons (getindex list (first get)) (getvalues (rest get) list))))
+
+(define (in [s : Symbol] [list : (Listof Symbol)] [count : Number]) : Number
+  (if (equal? list empty)
+      (error 'in "symbol not in list")
+      (if (equal? s (first list))
+          count
+          (in s (rest list) (+ count 1)))))
+
+(define (getpositions [get : (Listof Symbol)] [list : (Listof Symbol)]) : (Listof Number)
+  (if (equal? get empty)
+       empty
+       (cons (in (first get) list 0) (getpositions (rest get) list))))
+
+
 (define interp : (Exp (Listof (Symbol * Class)) Value Value -> Value)
   (lambda (a classes this-val arg-val)
     (local [(define (recur expr)
@@ -102,6 +132,23 @@
                                                                                [(classC ssuper-name sfieldnames smethodnames) (if (equal? ffieldnames sfieldnames) (if (equal? values v) (boolV #t) (boolV #f)) (boolV #f))])])))]
                                                           [else (boolV #f)])]
                                [else (boolV (equal? f s))])))]
+        [(assignE fst snd) (local [(define f (recur fst))]
+                             (local [(define s (recur snd))]
+                               (type-case Value f
+                               [(objV classname values) (type-case Value s
+                                                          [(objV name v) (local [(define fc (find classes classname))]
+                                                                           (local [(define sc (find classes name))]
+                                                                             (type-case Class fc
+                                                                               [(classC fsuper-name ffieldnames fmethodnames) (type-case Class sc
+                                                                               [(classC ssuper-name sfieldnames smethodnames)
+                                                                                (objV classname (getvalues (getpositions ffieldnames sfieldnames) v))])])))]
+                                                          [else (error 'interp "conflicting types")])]
+                               [(numV val) (type-case Value s
+                                             [(numV v) (numV v)]
+                                             [else (error 'interp "conflicting types")])]
+                               [(boolV val) (type-case Value s
+                                             [(boolV b) (boolV b)]
+                                             [else (error 'interp "conflicting types")])])))]
         [(newE class-name field-exprs)
          (local [(define c (if (equal? class-name 'Object)
                                (classC 'Object empty empty)
@@ -262,6 +309,8 @@
   (thisI)
   (equalsI [fst : ExpI]
            [snd : ExpI])
+  (assignI [fst : ExpI]
+           [snd : ExpI])
   (newI [class-name : Symbol]
         [args : (Listof ExpI)])
   (getI [obj-expr : ExpI]
@@ -298,6 +347,7 @@
       [(argI) (argE)]
       [(thisI) (thisE)]
       [(equalsI fst snd) (equalsE (recur fst) (recur snd))]
+      [(assignI fst snd) (assignE (recur fst) (recur snd))]
       [(newI class-name field-exprs)
        (newE class-name (map recur field-exprs))]
       [(getI expr field-name)
@@ -568,6 +618,9 @@
     (multI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
    [(s-exp-match? `{= ANY ANY} s)
+    (assignI (parse (second (s-exp->list s)))
+           (parse (third (s-exp->list s))))]
+   [(s-exp-match? `{== ANY ANY} s)
     (equalsI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
    [(s-exp-match? `{new SYMBOL ANY ...} s)
@@ -792,21 +845,28 @@
 
 
 ;Equality Tests:
-(test (interp-prog (list) `{= 1 1}) `#t)
-(test (interp-prog (list) `{= 1 2}) `#f)
-(test (interp-prog (list) `{= 1 true}) `#f)
-(test (interp-prog (list) `{= false false}) `#t)
+(test (interp-prog (list) `{== 1 1}) `#t)
+(test (interp-prog (list) `{== 1 2}) `#f)
+(test (interp-prog (list) `{== 1 true}) `#f)
+(test (interp-prog (list) `{== false false}) `#t)
 (test (interp-prog (list `{class Fish extends Object
- {size color}}) `{= (new Fish 1 2) false}) `#f)
-(test (interp-prog (list `{class Fish extends Object
- {size color}}
-                         `{class Shark extends Object
- {size color}}) `{= (new Fish 1 2) (new Shark 1 2)}) `#t)
+ {size color}}) `{== (new Fish 1 2) false}) `#f)
 (test (interp-prog (list `{class Fish extends Object
  {size color}}
                          `{class Shark extends Object
- {size color}}) `{= (new Fish 1 2) (new Shark 1 3)}) `#f)
+ {size color}}) `{== (new Fish 1 2) (new Shark 1 2)}) `#t)
 (test (interp-prog (list `{class Fish extends Object
  {size color}}
                          `{class Shark extends Object
- {size c}}) `{= (new Fish 1 2) (new Shark 1 2)}) `#f)
+ {size color}}) `{== (new Fish 1 2) (new Shark 1 3)}) `#f)
+(test (interp-prog (list `{class Fish extends Object
+ {size color}}
+                         `{class Shark extends Object
+ {size c}}) `{== (new Fish 1 2) (new Shark 1 2)}) `#f)
+
+
+
+
+
+;Assign Tests:
+;[TBA]
