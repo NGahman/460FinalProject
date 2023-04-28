@@ -698,6 +698,11 @@
       [(objV class-name field-vals) `object]
       [(boolV b) (boolean->s-exp b)])))
 
+(define (interp-run [classes : (Listof S-Exp)] [a : S-Exp]) : Value
+  (let ([v (interp-i (parse a)
+                     (map parse-class classes))])
+    v))
+
 (module+ test
   (test (interp-prog
          (list
@@ -869,4 +874,25 @@
 
 
 ;Assign Tests:
-;[TBA]
+
+;"index not in range" should never actually occur in code because another error would be triggered first, so this is just for code coverage
+(test/exn (getindex (list) 1) "index not in range")
+
+
+(test (interp-prog (list) `{= 1 1}) `1)
+(test/exn (interp-prog (list) `{= 1 true}) "conflicting types")
+(test (interp-prog (list) `{= false true}) `#t)
+(test/exn (interp-prog (list) `{= true 1}) "conflicting types")
+(test/exn (interp-prog (list `{class Fish extends Object
+ {size color}}) `{= (new Fish 1 2) 1}) "conflicting types")
+
+(test (interp-run (list `{class Fish extends Object
+ {size color}}) `{= (new Fish 1 2) (new Fish 4 5)}) (objV 'Fish (list (numV 4) (numV 5))))
+(test (interp-run (list `{class Fish extends Object
+ {size color}}
+                        `{class Shark extends Object
+ {size color}}) `{= (new Fish 1 2) (new Shark 4 5)}) (objV 'Fish (list (numV 4) (numV 5))))
+(test/exn (interp-run (list `{class Fish extends Object
+ {size color}}
+                        `{class Shark extends Object
+ {size teethlength}}) `{= (new Fish 1 2) (new Shark 4 5)}) "symbol not in list")
