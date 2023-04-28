@@ -896,3 +896,15 @@
  {size color}}
                         `{class Shark extends Object
  {size teethlength}}) `{= (new Fish 1 2) (new Shark 4 5)}) "symbol not in list")
+(test (interp-run (list `{class Fish extends Object
+ {size color}}
+                        `{class Shark extends Object
+ {size teeth color}}) `{= (new Fish 1 2) (new Shark 4 5 6)}) (objV 'Fish (list (numV 4) (numV 6))))
+(test (interp-run (list `{class Fish extends Object
+ {size color}}
+                        `{class Shark extends Object
+ {color teeth size}}) `{= (new Fish 1 2) (new Shark 4 5 6)}) (objV 'Fish (list (numV 6) (numV 4))))
+(test (interp-run (list `{class Fish extends Object
+ {size color}}
+                        `{class Shark extends Object
+ {color size teeth}}) `{= (new Fish 1 2) (new Shark 4 5 6)}) (objV 'Fish (list (numV 5) (numV 4))))
